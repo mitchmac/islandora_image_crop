@@ -1,1 +1,10 @@
 Resize image datastreams.
+
+Usage:
+- install module
+- modify islandora_image_crop_islandora_edit_datastream_registry to adjust datastreams the module acts on (@TODO: make configurable)
+
+Todo:
+- make datastreams the module acts on configurable
+- add option to create new datastream from resized image
+- input validation

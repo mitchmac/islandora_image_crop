@@ -1,7 +1,11 @@
 <?php
 
+/**
+ * Implementation of hook_menu.
+ */
 function islandora_image_crop_menu() {
   $items['islandora/image_crop/%'] = array(
+    'title' => 'Datastream Image Crop',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('islandora_image_crop_edit_form', 2, 3),
     'access arguments' => array('islandora crop datastream image'),
@@ -10,8 +14,27 @@ function islandora_image_crop_menu() {
   return $items;
 }
 
+/**
+ * Implementation of hook_permission.
+ */
+function islandora_image_crop_permission() {
+  return array(
+    'islandora crop datastream image' => array(
+      'title' => t('Crop image datastreams'), 
+      'description' => t('Crop an image datastream in the browser.'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_islandora_edit_datastream_registry.
+ * 
+ * @param $object
+ * @param $ds_id
+ */
 function islandora_image_crop_islandora_edit_datastream_registry($object, $ds_id) {
-  if ($ds_id == 'MEDIUM_SIZE') {
+  $datastreams = array('MEDIUM_SIZE', 'OBJ');
+  if (in_array($ds_id, $datastreams)) {
     return array(
       array(
         'Name' => t('Islandora Image Crop'),
@@ -22,32 +45,28 @@ function islandora_image_crop_islandora_edit_datastream_registry($object, $ds_id
   }
 }
 
-function islandora_image_crop_edit_form($form, &$form_state, $pid, $ds_id = NULL) {
+/**
+ * Image crop form.
+ * 
+ * @param $form
+ * @param $form_state
+ * @param $object_id
+ * @param $ds_id
+ */
+function islandora_image_crop_edit_form($form, &$form_state, $object_id, $ds_id = NULL) {
+  global $base_url;
+  
   $js_path = drupal_get_path('module', 'islandora_image_crop') . '/js/';
   drupal_add_js($js_path . 'jquery.Jcrop.min.js');
   drupal_add_js($js_path . 'islandora_image_crop.js');
   
   $form = array();
   
-  global $base_url;
-  
-  $image_url = $base_url . '/islandora/object/' . $pid . '/datastream/' . $ds_id . '/view';
+  //@TODO: ensure $object_id & $ds_id are valid
+  $image_url = $base_url . '/islandora/object/' . $object_id . '/datastream/' . $ds_id . '/view';
   
   $form['image'] = array(
-    '#markup' => theme('image', array('path' => $image_url));
-  );
-  
-  $form['image_action'] = array(
-    '#type' => 'radios',
-    '#title' => t('Action'),
-    '#description' => t('What should be done with the cropped image?'),
-    '#options' => array(0 => t('Replace existing datastream'), 1 => t('Create new datastream')),
-  );
-  
-  $form['new_ds_id'] = array(
-    '#type' => 'textfield',
-    '#title' => t('New datastream ID'),
-    '#description' => t('If creating a new datastream, label the datastream');
+    '#markup' => theme('image', array('path' => $image_url, 'attributes' => array('id' => 'jcrop-image'))),
   );
   
   $form['x'] = array(
@@ -66,19 +85,68 @@ function islandora_image_crop_edit_form($form, &$form_state, $pid, $ds_id = NULL
     '#type' => 'hidden',
   );
   
+  $form['image_url'] = array(
+    '#type' => 'value',
+    '#value' => $image_url,
+  );
+  
   $form['ds_id'] = array(
     '#type' => 'value',
     '#value' => $ds_id,
   );
   
-  $form['pid'] = array(
+  $form['object_id'] = array(
     '#type' => 'value',
-    '#value' => $pid,
+    '#value' => $object_id,
+  );
+  
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Submit')
   );
   
   return $form;
 }
 
-function islandora_image_crop_edit_form_submit($form, &$form_submit) {
-  global $base_url;
+/**
+ * Image crop form validation.
+ * 
+ * @param $form
+ * @param $form_state
+ */
+function islandora_image_crop_edit_form_validate($form, &$form_state) {
+  if (!is_numeric($form_state['values']['x']) || 
+    !is_numeric($form_state['values']['y']) ||
+    !is_numeric($form_state['values']['w']) ||
+    !is_numeric($form_state['values']['h'])) {
+      form_set_error('image', t('Please crop the image before submitting'));
+    }
+}
+
+/**
+ * Image crop form submit.
+ * 
+ * @param $form
+ * @param $form_state
+ */
+function islandora_image_crop_edit_form_submit($form, &$form_state) {
+  $object = islandora_object_load($form_state['values']['object_id']);
+  module_load_include('inc', 'islandora', 'includes/mime.detect');
+  
+  $mime_class = new MimeDetect();
+  $ext = $mime_class->getExtension($object[$form_state['values']['ds_id']]->mimeType);
+  $original_file = file_save_data($object[$form_state['values']['ds_id']]->content, 'temporary://islandora-image-crop-' . $object->id . '.'. $ext);
+  
+  $real_path = drupal_realpath($original_file->uri);
+  $image = image_load($real_path);
+  
+  image_crop($image, $form_state['values']['x'], $form_state['values']['y'], $form_state['values']['w'], $form_state['values']['h']);
+  image_save($image);
+  
+  $ds = $object[$form_state['values']['ds_id']];
+  $ds->setContentFromFile(drupal_realpath($original_file->uri));
+  file_delete($original_file);
+  
+  drupal_set_message(t('Image has been resized.'));
+  $form_state['redirect'] = 'islandora/object/' . $form_state['values']['object_id'] . '/manage';
 }
